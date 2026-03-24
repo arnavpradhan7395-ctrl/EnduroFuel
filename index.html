@@ -509,12 +509,24 @@ select.s-inp{appearance:none;cursor:pointer;background-image:none}
   </div>
   <button class="save-btn" onclick="saveSettings()">Save & Recalculate</button>
 
+  <div class="slbl">Data & Storage</div>
+  <div class="ins good" style="margin-bottom:0">
+    <div class="ins-icon">💾</div>
+    <div>
+      <div class="ins-title">Data saves automatically</div>
+      <div class="ins-body" id="storage-status">All food logs, weight entries, activities and settings are saved to this device. Data persists across sessions.</div>
+    </div>
+  </div>
+  <button onclick="exportData()" style="width:100%;padding:12px;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:var(--radius);font-family:'DM Sans',sans-serif;font-weight:500;font-size:13px;cursor:pointer;margin-top:8px">📤 Export data as JSON</button>
+  <button onclick="clearTodayData()" style="width:100%;padding:12px;background:var(--surface2);color:var(--orange);border:1px solid rgba(255,138,64,0.3);border-radius:var(--radius);font-family:'DM Sans',sans-serif;font-weight:500;font-size:13px;cursor:pointer;margin-top:6px">🗑 Clear today's food & activity log</button>
+  <button onclick="clearAllData()" style="width:100%;padding:12px;background:var(--red-dim);color:var(--red);border:1px solid rgba(255,92,92,0.3);border-radius:var(--radius);font-family:'DM Sans',sans-serif;font-weight:500;font-size:13px;cursor:pointer;margin-top:6px">⚠️ Clear ALL data (cannot be undone)</button>
+
   <div class="slbl">iPhone Install</div>
   <div class="ins info">
     <div class="ins-icon">📱</div>
     <div>
       <div class="ins-title">Add to iPhone Home Screen</div>
-      <div class="ins-body">Open this file in Safari → tap the Share button (box with arrow) → "Add to Home Screen". EnduroFuel will open full-screen like a native app — no browser chrome, no address bar.</div>
+      <div class="ins-body">Open in Safari → tap the Share button → "Add to Home Screen". EnduroFuel opens full-screen like a native app.</div>
     </div>
   </div>
 </div>
@@ -730,15 +742,80 @@ const SPORT_ICON={run:'🏃',ride:'🚴',swim:'🏊',brick:'🔄',strength:'🏋
 // ─────────────────────────────────
 // STATE
 // ─────────────────────────────────
-const S={
+// ─────────────────────────────────
+// PERSISTENT STATE — localStorage
+// ─────────────────────────────────
+const STORAGE_KEY = 'endurofuel_v3';
+
+const DEFAULT_STATE = {
   p:{name:'Athlete',weight:75,height:178,age:31,sex:'male',rhr:52,
      sport:'running',endHrs:8,strDays:2,deficit:500,protRatio:2.0,protect:true},
   day:'endurance',
   foods:[[],[],[],[]],
   acts:[],
   weights:[],
+  // Store logs per date so different days have different food logs
+  dailyLogs:{},  // { 'YYYY-MM-DD': { foods:[[],[],[],[]], acts:[], day:'endurance' } }
   meal:0
 };
+
+function loadState(){
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    if(!raw) return JSON.parse(JSON.stringify(DEFAULT_STATE));
+    const saved=JSON.parse(raw);
+    // Merge with defaults to handle new keys added in updates
+    const state=JSON.parse(JSON.stringify(DEFAULT_STATE));
+    if(saved.p) Object.assign(state.p, saved.p);
+    if(saved.weights) state.weights=saved.weights;
+    if(saved.dailyLogs) state.dailyLogs=saved.dailyLogs;
+    if(saved.day) state.day=saved.day;
+    return state;
+  }catch(e){
+    console.warn('Failed to load state:',e);
+    return JSON.parse(JSON.stringify(DEFAULT_STATE));
+  }
+}
+
+function saveState(){
+  try{
+    // Persist today's foods and acts into dailyLogs before saving
+    const today=todayKey();
+    S.dailyLogs[today]={foods:S.foods,acts:S.acts,day:S.day};
+    // Trim dailyLogs to last 90 days to avoid bloat
+    const keys=Object.keys(S.dailyLogs).sort();
+    if(keys.length>90) keys.slice(0,keys.length-90).forEach(k=>delete S.dailyLogs[k]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      p:S.p, weights:S.weights, dailyLogs:S.dailyLogs, day:S.day
+    }));
+  }catch(e){
+    console.warn('Failed to save state:',e);
+  }
+}
+
+function todayKey(){
+  return new Date().toISOString().slice(0,10);
+}
+
+function loadTodayLog(){
+  const today=todayKey();
+  const log=S.dailyLogs[today];
+  if(log){
+    S.foods=log.foods||[[],[],[],[]];
+    S.acts=log.acts||[];
+    S.day=log.day||'endurance';
+  } else {
+    S.foods=[[],[],[],[]];
+    S.acts=[];
+    // Keep last known day type
+  }
+}
+
+// Patch all state-mutating functions to auto-save
+const _origRenderAll=()=>{renderToday();renderLog();renderActivity();renderBody();renderFuel();};
+function renderAll(){_origRenderAll();saveState();}
+
+const S=loadState();
 
 // ─────────────────────────────────
 // HR / KARVONEN
@@ -3374,6 +3451,7 @@ function setDay(d){
   [{k:'endurance',c:'de'},{k:'strength',c:'ds'},{k:'rest',c:'dr'}].forEach(({k,c})=>{
     el('db-'+k).className='day-btn'+(k===d?' '+c:'');
   });
+  saveState();
   renderAll();
 }
 function saveSettings(){
@@ -3384,30 +3462,89 @@ function saveSettings(){
   p.sport=el('s-sport').value;p.endHrs=parseInt(el('s-endhrs').value)||8;
   p.strDays=parseInt(el('s-strdays').value)||2;p.deficit=parseInt(el('s-deficit').value)||0;
   p.protRatio=parseFloat(el('s-prot').value)||2.0;p.protect=el('s-protect').checked;
+  saveState();
   showPage('today');
+}
+
+// ── DATA MANAGEMENT ──────────────────────────────
+function exportData(){
+  const data=JSON.stringify({
+    exported: new Date().toISOString(),
+    profile: S.p,
+    weights: S.weights,
+    dailyLogs: S.dailyLogs
+  }, null, 2);
+  const blob=new Blob([data],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='endurofuel-export-'+todayKey()+'.json';
+  a.click();URL.revokeObjectURL(url);
+}
+
+function clearTodayData(){
+  const today=todayKey();
+  S.foods=[[],[],[],[]];S.acts=[];
+  delete S.dailyLogs[today];
+  saveState();renderAll();
+  el('storage-status').textContent='Today\'s log cleared.';
+}
+
+function clearAllData(){
+  if(!confirm('This will delete ALL your food logs, weight history, and settings. Are you sure?')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+}
+
+function updateStorageStatus(){
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    if(!raw){el('storage-status').textContent='No data saved yet.';return;}
+    const days=Object.keys(JSON.parse(raw).dailyLogs||{}).length;
+    const weights=(JSON.parse(raw).weights||[]).length;
+    const kb=Math.round(raw.length/1024*10)/10;
+    if(el('storage-status'))
+      el('storage-status').textContent=`${days} day${days!==1?'s':''} of logs · ${weights} weight entries · ${kb} KB stored on this device.`;
+  }catch{}
 }
 function showPage(page){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
   el('page-'+page).classList.add('active');
   const tab=el('tab-'+page);if(tab)tab.classList.add('active');
+  if(page==='settings') updateStorageStatus();
   renderAll();
 }
 
-function renderAll(){renderToday();renderLog();renderActivity();renderBody();renderFuel();}
+function renderAllPages(){renderToday();renderLog();renderActivity();renderBody();renderFuel();}
 
 // DATE
 const now=new Date();
 const D=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],Mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 el('date-pill').textContent=D[now.getDay()]+' '+now.getDate()+' '+Mo[now.getMonth()];
 
-// SEED DEMO WEIGHT DATA
-(()=>{
-  const base=75.8;
-  for(let i=13;i>=0;i--){
-    const d=new Date();d.setDate(d.getDate()-i);
-    S.weights.push({date:d.toISOString().slice(0,10),kg:+(base-(13-i)*0.04+(Math.random()-.5)*.7).toFixed(1)});
-  }
+// ── INIT ──────────────────────────────────────────
+// Load today's food/activity log from dailyLogs
+loadTodayLog();
+
+// Sync day type buttons to loaded state
+;(()=>{
+  [{k:'endurance',c:'de'},{k:'strength',c:'ds'},{k:'rest',c:'dr'}].forEach(({k,c})=>{
+    const b=el('db-'+k);
+    if(b) b.className='day-btn'+(k===S.day?' '+c:'');
+  });
+})();
+
+// Sync settings fields to loaded profile
+;(()=>{
+  const p=S.p;
+  const fields={
+    's-name':p.name,'s-weight':p.weight,'s-height':p.height,
+    's-age':p.age,'s-sex':p.sex,'s-rhr':p.rhr,'s-sport':p.sport,
+    's-endhrs':p.endHrs,'s-strdays':p.strDays,'s-prot':p.protRatio
+  };
+  Object.entries(fields).forEach(([id,val])=>{const e=el(id);if(e)e.value=val;});
+  const defEl=el('s-deficit');if(defEl)defEl.value=p.deficit;
+  const protEl=el('s-protect');if(protEl)protEl.checked=p.protect;
 })();
 
 renderAll();
