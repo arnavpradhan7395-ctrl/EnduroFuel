@@ -266,8 +266,11 @@ select.s-inp{appearance:none;cursor:pointer;background-image:none}
 <div class="topbar">
   <div class="logo">Enduro<span>Fuel</span></div>
   <div class="topbar-right">
-    <div class="date-pill" id="date-pill"></div>
-    <div class="icon-btn" onclick="showPage('settings')">⚙</div>
+    <div style="position:relative">
+      <div class="date-pill" id="date-pill" onclick="el('cal-input').click()" style="cursor:pointer" title="View another date">📅 <span id="date-pill-text"></span></div>
+      <input type="date" id="cal-input" onchange="onCalChange(event)" style="position:absolute;opacity:0;width:1px;height:1px;top:0;left:0;pointer-events:none">
+    </div>
+    <div class="icon-btn" id="settings-btn" onclick="toggleSettings()" title="Settings">⚙</div>
   </div>
 </div>
 
@@ -507,7 +510,10 @@ select.s-inp{appearance:none;cursor:pointer;background-image:none}
   <div class="s-group">
     <div class="s-row"><div><div class="s-lbl">g/kg bodyweight</div><div class="s-sub">Rec: 1.8–2.2g for endurance athletes</div></div><input type="number" class="s-inp" id="s-prot" value="2.0" min="1.4" max="2.5" step="0.1"></div>
   </div>
-  <button class="save-btn" onclick="saveSettings()">Save & Recalculate</button>
+  <div style="display:flex;gap:8px">
+    <button onclick="toggleSettings()" style="flex:1;padding:14px;background:var(--surface2);color:var(--muted);border:1px solid var(--border);border-radius:var(--radius);font-family:'Syne',sans-serif;font-weight:700;font-size:14px;cursor:pointer">Close</button>
+    <button class="save-btn" onclick="saveSettings()" style="flex:2">Save & Recalculate</button>
+  </div>
 
   <div class="slbl">Data & Storage</div>
   <div class="ins good" style="margin-bottom:0">
@@ -630,6 +636,30 @@ select.s-inp{appearance:none;cursor:pointer;background-image:none}
       <div class="modal-btns"><button class="btn-x" onclick="closeModal('food-modal')">Cancel</button><button class="btn-ok" onclick="confirmFoodManual()">Add</button></div>
     </div>
 
+  </div>
+</div>
+
+<!-- EDIT FOOD MODAL -->
+<div class="overlay" id="edit-food-modal">
+  <div class="modal">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="modal-title" style="margin-bottom:0">Edit Food</div>
+      <button onclick="closeModal('edit-food-modal')" style="width:30px;height:30px;border-radius:50%;background:var(--surface2);border:1px solid var(--border);color:var(--muted);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center">✕</button>
+    </div>
+    <input type="text" id="ef-name" placeholder="Food name">
+    <div class="modal-row" style="margin-bottom:8px">
+      <input type="number" id="ef-cal" placeholder="Calories (kcal)">
+      <input type="number" id="ef-carb" placeholder="Carbs (g)">
+    </div>
+    <div class="modal-row" style="margin-bottom:8px">
+      <input type="number" id="ef-prot" placeholder="Protein (g)">
+      <input type="number" id="ef-fat" placeholder="Fat (g)">
+    </div>
+    <input type="text" id="ef-port" placeholder="Portion (e.g. 100g, 2 eggs)" style="margin-bottom:0">
+    <div class="modal-btns">
+      <button class="btn-x" onclick="closeModal('edit-food-modal')">Cancel</button>
+      <button class="btn-ok" onclick="confirmEditFood()">Save</button>
+    </div>
   </div>
 </div>
 
@@ -778,6 +808,8 @@ function loadState(){
 }
 
 function saveState(){
+  // Never overwrite a historical day's log while browsing it
+  if(typeof _viewDate!=='undefined' && _viewDate!==todayKey()) return;
   try{
     // Persist today's foods and acts into dailyLogs before saving
     const today=todayKey();
@@ -922,7 +954,22 @@ function renderLog(){
   set('pr-f',c.fat  +' / '+m.fatG +'g');sw('pf-f',p(c.fat, m.fatG ));col('pf-f',c.fat >m.fatG ?'var(--red)':'var(--fat)');
   el('meal-list').innerHTML=MEAL_NAMES.map((name,i)=>{
     const mc=S.foods[i].reduce((s,f)=>s+f.cal,0);
-    const rows=S.foods[i].map((f,j)=>`<div class="food-row" onclick="rmFood(${i},${j})"><div><div class="food-name">${f.name}</div><div class="food-sub">${f.port}·${f.cal}kcal</div></div><div class="food-macros"><span class="fm-c">${f.carb}c</span><span class="fm-p">${f.prot}p</span><span class="fm-f">${f.fat}f</span></div></div>`).join('');
+    const rows=S.foods[i].map((f,j)=>`
+      <div class="food-row" style="cursor:default">
+        <div style="flex:1;min-width:0">
+          <div class="food-name">${f.name}</div>
+          <div class="food-sub">${f.port} · ${f.cal}kcal</div>
+        </div>
+        <div class="food-macros" style="margin-right:8px">
+          <span class="fm-c">${f.carb}c</span>
+          <span class="fm-p">${f.prot}p</span>
+          <span class="fm-f">${f.fat}f</span>
+        </div>
+        <div style="display:flex;gap:5px;flex-shrink:0">
+          <button onclick="event.stopPropagation();editFood(${i},${j})" style="padding:4px 9px;font-size:11px;background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif">Edit</button>
+          <button onclick="event.stopPropagation();rmFood(${i},${j})" style="padding:4px 9px;font-size:11px;background:var(--red-dim);border:1px solid rgba(255,92,92,0.25);border-radius:5px;color:var(--red);cursor:pointer;font-family:'DM Sans',sans-serif">✕</button>
+        </div>
+      </div>`).join('');
     return `<div><div class="meal-head"><span class="meal-name">${name}</span><span class="meal-cals">${mc}kcal</span></div>${rows}<button class="add-row" onclick="openFood(${i})">+ Add food</button></div>`;
   }).join('');
 }
@@ -3306,6 +3353,41 @@ function confirmFoodManual(){
 // Legacy alias so any existing calls to confirmFood still work
 function confirmFood(){confirmFoodManual();}
 
+function rmFood(meal,idx){
+  S.foods[meal].splice(idx,1);
+  renderAll();
+}
+
+// ── FOOD EDIT ────────────────────────────────────
+let _editFoodMeal=null,_editFoodIdx=null;
+
+function editFood(meal,idx){
+  _editFoodMeal=meal;_editFoodIdx=idx;
+  const f=S.foods[meal][idx];
+  el('ef-name').value=f.name||'';
+  el('ef-cal').value=f.cal||0;
+  el('ef-carb').value=f.carb||0;
+  el('ef-prot').value=f.prot||0;
+  el('ef-fat').value=f.fat||0;
+  el('ef-port').value=f.port||'';
+  el('edit-food-modal').classList.add('open');
+}
+
+function confirmEditFood(){
+  if(_editFoodMeal===null||_editFoodIdx===null)return;
+  S.foods[_editFoodMeal][_editFoodIdx]={
+    name:el('ef-name').value||'Food',
+    cal:+el('ef-cal').value||0,
+    carb:+el('ef-carb').value||0,
+    prot:+el('ef-prot').value||0,
+    fat:+el('ef-fat').value||0,
+    port:el('ef-port').value||'1 serving'
+  };
+  _editFoodMeal=null;_editFoodIdx=null;
+  closeModal('edit-food-modal');
+  renderAll();
+}
+
 // ── BARCODE via native camera photo ──
 async function fsBarcodePhoto(e){
   const file=e.target.files[0];
@@ -3462,7 +3544,10 @@ function saveSettings(){
   p.sport=el('s-sport').value;p.endHrs=parseInt(el('s-endhrs').value)||8;
   p.strDays=parseInt(el('s-strdays').value)||2;p.deficit=parseInt(el('s-deficit').value)||0;
   p.protRatio=parseFloat(el('s-prot').value)||2.0;p.protect=el('s-protect').checked;
+  // Force save regardless of view date — settings always persist
+  const tmp=_viewDate; _viewDate=todayKey();
   saveState();
+  _viewDate=tmp;
   showPage('today');
 }
 
@@ -3511,16 +3596,97 @@ function showPage(page){
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
   el('page-'+page).classList.add('active');
   const tab=el('tab-'+page);if(tab)tab.classList.add('active');
-  if(page==='settings') updateStorageStatus();
+  if(page==='settings'){
+    updateStorageStatus();
+    el('settings-btn').style.background='var(--accent-dim)';
+    el('settings-btn').style.borderColor='var(--accent-border)';
+    el('settings-btn').style.color='var(--accent)';
+  } else {
+    el('settings-btn').style.background='';
+    el('settings-btn').style.borderColor='';
+    el('settings-btn').style.color='';
+  }
   renderAll();
 }
 
 function renderAllPages(){renderToday();renderLog();renderActivity();renderBody();renderFuel();}
 
-// DATE
+// ── DATE & CALENDAR ────────────────────────────────
 const now=new Date();
 const D=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],Mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-el('date-pill').textContent=D[now.getDay()]+' '+now.getDate()+' '+Mo[now.getMonth()];
+
+// Track which date is currently being viewed
+let _viewDate=todayKey();
+
+function formatDatePill(isoDate){
+  const d=new Date(isoDate+'T12:00:00');
+  const isToday=isoDate===todayKey();
+  return (isToday?'':'◀ ')+D[d.getDay()]+' '+d.getDate()+' '+Mo[d.getMonth()]+(isToday?'':'');
+}
+
+function setViewDate(isoDate){
+  _viewDate=isoDate;
+  el('date-pill-text').textContent=formatDatePill(isoDate);
+  el('cal-input').value=isoDate;
+  // Load that day's log into S.foods / S.acts
+  const isToday=isoDate===todayKey();
+  const log=S.dailyLogs[isoDate];
+  S.foods=log?JSON.parse(JSON.stringify(log.foods||[[],[],[],[]]))  :[[],[],[],[]];
+  S.acts =log?JSON.parse(JSON.stringify(log.acts||[]))              :[];
+  if(log&&log.day) S.day=log.day;
+  // Update day buttons
+  [{k:'endurance',c:'de'},{k:'strength',c:'ds'},{k:'rest',c:'dr'}].forEach(({k,c})=>{
+    const b=el('db-'+k);if(b)b.className='day-btn'+(k===S.day?' '+c:'');
+  });
+  // Show banner if viewing historical date
+  let banner=el('viewing-banner');
+  if(!banner){
+    banner=document.createElement('div');
+    banner.id='viewing-banner';
+    banner.style.cssText='background:var(--orange-dim);border-bottom:1px solid rgba(255,138,64,0.3);padding:7px 20px;font-size:12px;color:var(--orange);font-family:\'DM Mono\',monospace;display:none;align-items:center;justify-content:space-between;';
+    // Insert after page-nav if it exists, otherwise after topbar, otherwise body
+    const anchor=document.querySelector('.page-nav')||document.querySelector('.topbar');
+    if(anchor) anchor.after(banner);
+    else document.querySelector('.app').prepend(banner);
+  }
+  if(!isToday){
+    const d=new Date(isoDate+'T12:00:00');
+    banner.innerHTML=`<span>Viewing ${D[d.getDay()]} ${d.getDate()} ${Mo[d.getMonth()]} ${d.getFullYear()} — read only</span><button onclick="setViewDate('${todayKey()}')" style="background:transparent;border:1px solid rgba(255,138,64,0.4);color:var(--orange);border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer;font-family:'DM Mono',monospace">Back to today</button>`;
+    banner.style.display='flex';
+  } else {
+    banner.style.display='none';
+  }
+  renderAll();
+}
+
+function onCalChange(e){
+  if(e.target.value) setViewDate(e.target.value);
+}
+
+// _viewingHistory flag — used by saveState (defined earlier) to guard writes
+// saveState already exists above; we just need it to check _viewDate
+// No patching needed — saveState checks _viewDate directly (see below)
+
+// Set initial date
+el('cal-input').max=todayKey();
+// Banner is inserted into body on first call — safe after DOM ready
+setViewDate(todayKey());
+
+// ── SETTINGS TOGGLE ────────────────────────────────
+function toggleSettings(){
+  const isSettings=el('page-settings').classList.contains('active');
+  if(isSettings){
+    showPage('today');
+    el('settings-btn').style.background='';
+    el('settings-btn').style.borderColor='';
+    el('settings-btn').style.color='';
+  } else {
+    showPage('settings');
+    el('settings-btn').style.background='var(--accent-dim)';
+    el('settings-btn').style.borderColor='var(--accent-border)';
+    el('settings-btn').style.color='var(--accent)';
+  }
+}
 
 // ── INIT ──────────────────────────────────────────
 // Load today's food/activity log from dailyLogs
