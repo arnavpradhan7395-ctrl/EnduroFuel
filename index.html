@@ -266,11 +266,30 @@ select.s-inp{appearance:none;cursor:pointer;background-image:none}
 <div class="topbar">
   <div class="logo">Enduro<span>Fuel</span></div>
   <div class="topbar-right">
-    <div style="position:relative">
-      <div class="date-pill" id="date-pill" onclick="el('cal-input').click()" style="cursor:pointer" title="View another date">📅 <span id="date-pill-text"></span></div>
-      <input type="date" id="cal-input" onchange="onCalChange(event)" style="position:absolute;opacity:0;width:1px;height:1px;top:0;left:0;pointer-events:none">
-    </div>
+    <div class="date-pill" id="date-pill" onclick="openCalendar()" style="cursor:pointer" title="View another date">📅 <span id="date-pill-text"></span></div>
     <div class="icon-btn" id="settings-btn" onclick="toggleSettings()" title="Settings">⚙</div>
+  </div>
+</div>
+
+<!-- CALENDAR MODAL -->
+<div class="overlay" id="cal-modal">
+  <div class="modal" style="padding-bottom:28px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <button onclick="calPrevMonth()" style="width:32px;height:32px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text);font-size:16px;cursor:pointer">‹</button>
+      <div style="font-family:'Syne',sans-serif;font-weight:700;font-size:16px" id="cal-month-label"></div>
+      <button onclick="calNextMonth()" style="width:32px;height:32px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-xs);color:var(--text);font-size:16px;cursor:pointer">›</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:6px">
+      <div style="text-align:center;font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;padding:4px 0">S</div>
+      <div style="text-align:center;font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;padding:4px 0">M</div>
+      <div style="text-align:center;font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;padding:4px 0">T</div>
+      <div style="text-align:center;font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;padding:4px 0">W</div>
+      <div style="text-align:center;font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;padding:4px 0">T</div>
+      <div style="text-align:center;font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;padding:4px 0">F</div>
+      <div style="text-align:center;font-size:10px;color:var(--muted);font-family:'DM Mono',monospace;padding:4px 0">S</div>
+    </div>
+    <div id="cal-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px"></div>
+    <button onclick="closeModal('cal-modal')" style="width:100%;margin-top:14px;padding:11px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--muted);font-family:'DM Sans',sans-serif;font-size:13px;cursor:pointer">Cancel</button>
   </div>
 </div>
 
@@ -403,7 +422,7 @@ select.s-inp{appearance:none;cursor:pointer;background-image:none}
         </div>
         <div id="b-chip" class="chip ch-m">No data</div>
       </div>
-      <div class="weight-chart-wrap"><canvas id="wcanvas"></canvas></div>
+      <div id="weight-chart-svg" style="width:100%;height:130px;margin:8px 0 4px"></div>
     </div>
   </div>
   <div>
@@ -762,6 +781,8 @@ const col=(id,c)=>{const e=el(id);if(e)e.style.background=c;};
 // CONSTANTS
 // ─────────────────────────────────
 const ZONE_PCT=[[.50,.60],[.60,.70],[.70,.80],[.80,.90],[.90,1.0]];
+const D=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const Mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const ZONE_NAMES=['Z1 Recovery','Z2 Aerobic','Z3 Tempo','Z4 Threshold','Z5 VO2max'];
 const ZONE_FUEL=['Fat dominant','Fat + glycogen','Mixed','Glycogen dom.','Glycogen only'];
 const ZONE_COL=['#64748b','#22c55e','#f59e0b','#ef4444','#a855f7'];
@@ -910,8 +931,8 @@ const consumed=()=>{
 // ─────────────────────────────────
 // WEIGHT TREND
 // ─────────────────────────────────
-const roll7=()=>{if(!S.weights.length)return null;const r=S.weights.slice(-7);return+(r.reduce((s,w)=>s+w.kg,0)/r.length).toFixed(1);};
-const prevAvg=()=>{const p=S.weights.slice(-14,-7);if(!p.length)return null;return+(p.reduce((s,w)=>s+w.kg,0)/p.length).toFixed(1);};
+const roll7=()=>{if(!S.weights.length)return null;const r=S.weights.slice(-7);return+(r.reduce((s,w)=>s+parseFloat(w.kg),0)/r.length).toFixed(1);};
+const prevAvg=()=>{const p=S.weights.slice(-14,-7);if(!p.length)return null;return+(p.reduce((s,w)=>s+parseFloat(w.kg),0)/p.length).toFixed(1);};
 
 // ─────────────────────────────────
 // RENDER — TODAY
@@ -1046,28 +1067,87 @@ function renderBody(){
   drawWeight();
 }
 function drawWeight(){
-  const canvas=el('wcanvas');if(!canvas)return;
-  const ctx=canvas.getContext('2d');
-  const dpr=window.devicePixelRatio||1;
-  const W=canvas.parentElement.offsetWidth||320,H=110;
-  canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';
-  ctx.scale(dpr,dpr);ctx.clearRect(0,0,W,H);
-  if(S.weights.length<2){ctx.fillStyle='#4a4d55';ctx.font='12px DM Sans';ctx.textAlign='center';ctx.fillText('Log 2+ days to see chart',W/2,H/2);return;}
-  const data=S.weights.slice(-14);
+  const wrap=el('weight-chart-svg');
+  if(!wrap)return;
+
+  // Build sorted, deduped weight array with real Date objects
+  const entries=[...S.weights]
+    .filter(w=>w.date&&!isNaN(parseFloat(w.kg)))
+    .map(w=>({date:w.date,kg:parseFloat(w.kg)}))
+    .sort((a,b)=>a.date.localeCompare(b.date));
+
+  if(entries.length===0){
+    wrap.innerHTML=`<div style="height:130px;display:flex;align-items:center;justify-content:center;color:#4a4d55;font-size:12px;font-family:'DM Sans',sans-serif">Log your morning weight to start tracking</div>`;
+    return;
+  }
+  if(entries.length===1){
+    wrap.innerHTML=`<div style="height:130px;display:flex;align-items:center;justify-content:center;color:#4a4d55;font-size:12px;font-family:'DM Sans',sans-serif">Log 1 more day to see trend</div>`;
+    return;
+  }
+
+  // Use last 30 entries max
+  const data=entries.slice(-30);
   const kgs=data.map(d=>d.kg);
-  const lo=Math.min(...kgs)-0.3,hi=Math.max(...kgs)+0.3;
-  const px=k=>H-8-((k-lo)/(hi-lo))*(H-16);
-  const py=i=>8+(i/(data.length-1))*(W-16);
-  // rolling avg
-  const avg=data.map((_,i)=>{const sl=data.slice(Math.max(0,i-6),i+1);return+(sl.reduce((s,d)=>s+d.kg,0)/sl.length).toFixed(2);});
-  // dots (raw)
-  data.forEach((d,i)=>{ctx.beginPath();ctx.arc(py(i),px(d.kg),2.5,0,Math.PI*2);ctx.fillStyle='rgba(200,245,90,0.2)';ctx.fill();});
-  // avg line
-  ctx.beginPath();ctx.strokeStyle='#c8f55a';ctx.lineWidth=2;ctx.lineJoin='round';
-  avg.forEach((k,i)=>i===0?ctx.moveTo(py(i),px(k)):ctx.lineTo(py(i),px(k)));
-  ctx.stroke();
-  // end dot
-  ctx.beginPath();ctx.arc(py(data.length-1),px(avg[avg.length-1]),4,0,Math.PI*2);ctx.fillStyle='#c8f55a';ctx.fill();
+  const rawMin=Math.min(...kgs),rawMax=Math.max(...kgs);
+  const pad=rawMin===rawMax?1.0:Math.max((rawMax-rawMin)*0.15,0.3);
+  const yMin=rawMin-pad,yMax=rawMax+pad,yRange=yMax-yMin;
+
+  const W=320,H=120,PL=38,PR=10,PT=10,PB=28;
+  const cW=W-PL-PR,cH=H-PT-PB;
+  const n=data.length;
+
+  const cx=i=>PL+i/(n-1)*cW;
+  const cy=v=>PT+cH-(v-yMin)/yRange*cH;
+
+  // Compute 7-day rolling avg per point
+  const rollingAvg=data.map((_,i)=>{
+    const slice=data.slice(Math.max(0,i-6),i+1);
+    return slice.reduce((s,d)=>s+d.kg,0)/slice.length;
+  });
+
+  // Build SVG pieces
+  let gridLines='',xLabels='',yLabels='',rawDots='',avgPath='',avgDots='';
+
+  // Y grid lines (4 lines)
+  const ySteps=4;
+  for(let i=0;i<=ySteps;i++){
+    const v=yMin+yRange*i/ySteps;
+    const y=cy(v);
+    gridLines+=`<line x1="${PL}" y1="${y.toFixed(1)}" x2="${W-PR}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>`;
+    yLabels+=`<text x="${PL-4}" y="${(y+3.5).toFixed(1)}" text-anchor="end" fill="#4a4d55" font-size="9" font-family="DM Mono,monospace">${v.toFixed(1)}</text>`;
+  }
+
+  // X labels — show date for first, last, and every ~7th point
+  data.forEach((d,i)=>{
+    if(i===0||i===n-1||i%Math.max(1,Math.floor(n/5))===0){
+      const dt=new Date(d.date+'T12:00:00');
+      const lbl=`${dt.getDate()} ${Mo[dt.getMonth()]}`;
+      xLabels+=`<text x="${cx(i).toFixed(1)}" y="${H-6}" text-anchor="middle" fill="#4a4d55" font-size="9" font-family="DM Mono,monospace">${lbl}</text>`;
+    }
+  });
+
+  // Raw weight dots (faint)
+  data.forEach((d,i)=>{
+    rawDots+=`<circle cx="${cx(i).toFixed(1)}" cy="${cy(d.kg).toFixed(1)}" r="2.5" fill="rgba(200,245,90,0.18)"/>`;
+  });
+
+  // Rolling avg line
+  const avgPoints=rollingAvg.map((v,i)=>`${cx(i).toFixed(1)},${cy(v).toFixed(1)}`).join(' ');
+  avgPath=`<polyline points="${avgPoints}" fill="none" stroke="#c8f55a" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+  // Rolling avg dots — highlight today
+  const todayIso=todayKey();
+  rollingAvg.forEach((v,i)=>{
+    const isToday=data[i].date===todayIso;
+    avgDots+=`<circle cx="${cx(i).toFixed(1)}" cy="${cy(v).toFixed(1)}" r="${isToday?5:2.5}" fill="${isToday?'#c8f55a':'rgba(200,245,90,0.6)'}"/>`;
+    if(isToday){
+      avgDots+=`<text x="${cx(i).toFixed(1)}" y="${(cy(v)-8).toFixed(1)}" text-anchor="middle" fill="#c8f55a" font-size="10" font-family="DM Mono,monospace" font-weight="500">${v.toFixed(1)}</text>`;
+    }
+  });
+
+  wrap.innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:130px;display:block">
+    ${gridLines}${yLabels}${xLabels}${rawDots}${avgPath}${avgDots}
+  </svg>`;
 }
 
 // ─────────────────────────────────
@@ -3525,7 +3605,11 @@ function logWeight(){
   const today=new Date().toISOString().slice(0,10);
   const ex=S.weights.findIndex(w=>w.date===today);
   if(ex>=0)S.weights[ex].kg=v;else S.weights.push({date:today,kg:v});
-  el('w-inp').value='';renderBody();
+  // Sort by date to keep consistent order
+  S.weights.sort((a,b)=>a.date.localeCompare(b.date));
+  el('w-inp').value='';
+  saveState();
+  renderBody();
 }
 function closeModal(id){el(id).classList.remove('open');if(id==='food-modal')fsBarcodeStop();}
 function setDay(d){
@@ -3612,8 +3696,6 @@ function showPage(page){
 function renderAllPages(){renderToday();renderLog();renderActivity();renderBody();renderFuel();}
 
 // ── DATE & CALENDAR ────────────────────────────────
-const now=new Date();
-const D=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'],Mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // Track which date is currently being viewed
 let _viewDate=todayKey();
@@ -3627,7 +3709,6 @@ function formatDatePill(isoDate){
 function setViewDate(isoDate){
   _viewDate=isoDate;
   el('date-pill-text').textContent=formatDatePill(isoDate);
-  el('cal-input').value=isoDate;
   // Load that day's log into S.foods / S.acts
   const isToday=isoDate===todayKey();
   const log=S.dailyLogs[isoDate];
@@ -3659,18 +3740,69 @@ function setViewDate(isoDate){
   renderAll();
 }
 
-function onCalChange(e){
-  if(e.target.value) setViewDate(e.target.value);
+// ── CUSTOM CALENDAR ────────────────────────────────
+let _calYear=0,_calMonth=0;
+const CAL_MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function openCalendar(){
+  const d=new Date(_viewDate+'T12:00:00');
+  _calYear=d.getFullYear();_calMonth=d.getMonth();
+  renderCalendar();
+  el('cal-modal').classList.add('open');
 }
 
-// _viewingHistory flag — used by saveState (defined earlier) to guard writes
-// saveState already exists above; we just need it to check _viewDate
-// No patching needed — saveState checks _viewDate directly (see below)
+function renderCalendar(){
+  el('cal-month-label').textContent=CAL_MONTHS[_calMonth]+' '+_calYear;
+  const today=todayKey();
+  const loggedDays=new Set(Object.keys(S.dailyLogs));
+  // Has any food logged that day
+  const hasLog=iso=>loggedDays.has(iso)&&(S.dailyLogs[iso]?.foods||[]).some(m=>m.length>0);
+  const firstDay=new Date(_calYear,_calMonth,1).getDay(); // 0=Sun
+  const daysInMonth=new Date(_calYear,_calMonth+1,0).getDate();
+  const todayObj=new Date(today+'T12:00:00');
+  let html='';
+  // Empty cells before first day
+  for(let i=0;i<firstDay;i++) html+=`<div></div>`;
+  for(let d=1;d<=daysInMonth;d++){
+    const iso=`${_calYear}-${String(_calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday=iso===today;
+    const isSelected=iso===_viewDate;
+    const isFuture=iso>today;
+    const logged=hasLog(iso);
+    const hasWeight=S.weights.some(w=>w.date===iso);
+    let bg='var(--surface2)';let color='var(--muted)';let border='var(--border)';let extra='';
+    if(isSelected){bg='var(--accent)';color='var(--bg)';border='var(--accent)';}
+    else if(isToday){bg='var(--surface3)';color='var(--accent)';border='var(--accent-border)';}
+    else if(isFuture){color='var(--muted2)';}
+    else if(logged){bg='var(--accent-dim)';color='var(--text)';border='var(--accent-border)';}
+    const dot=hasWeight&&!isSelected?`<div style="width:4px;height:4px;border-radius:50%;background:var(--blue);margin:1px auto 0"></div>`:'';
+    const click=isFuture?'':`onclick="calSelectDay('${iso}')"`;
+    html+=`<div ${click} style="aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:6px;background:${bg};border:1px solid ${border};color:${color};font-size:12px;font-family:'DM Mono',monospace;cursor:${isFuture?'default':'pointer'};transition:opacity 0.1s">${d}${dot}</div>`;
+  }
+  el('cal-grid').innerHTML=html;
+}
 
-// Set initial date
-el('cal-input').max=todayKey();
-// Banner is inserted into body on first call — safe after DOM ready
-setViewDate(todayKey());
+function calSelectDay(iso){
+  closeModal('cal-modal');
+  setViewDate(iso);
+}
+
+function calPrevMonth(){
+  _calMonth--;
+  if(_calMonth<0){_calMonth=11;_calYear--;}
+  if(_calYear<2020){_calYear=2020;_calMonth=0;}
+  renderCalendar();
+}
+
+function calNextMonth(){
+  _calMonth++;
+  if(_calMonth>11){_calMonth=0;_calYear++;}
+  if(_calYear>2050){_calYear=2050;_calMonth=11;}
+  renderCalendar();
+}
+
+// Keep onCalChange as no-op in case anything still references it
+function onCalChange(){}
 
 // ── SETTINGS TOGGLE ────────────────────────────────
 function toggleSettings(){
@@ -3689,6 +3821,17 @@ function toggleSettings(){
 }
 
 // ── INIT ──────────────────────────────────────────
+// Seed baseline weight entries if none exist yet
+if(S.weights.length===0){
+  for(let i=6;i>=0;i--){
+    const d=new Date();d.setDate(d.getDate()-i);
+    const iso=d.toISOString().slice(0,10);
+    // Only add if not already present
+    if(!S.weights.find(w=>w.date===iso))
+      S.weights.push({date:iso,kg:105.0});
+  }
+}
+
 // Load today's food/activity log from dailyLogs
 loadTodayLog();
 
@@ -3714,6 +3857,8 @@ loadTodayLog();
 })();
 
 renderAll();
+// Initialise date pill and view
+setViewDate(todayKey());
 </script>
 </body>
 </html>
